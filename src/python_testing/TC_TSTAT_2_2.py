@@ -49,8 +49,6 @@ from mobly import asserts
 
 logger = logging.getLogger(__name__)
 
-cluster = Clusters.Thermostat
-
 
 # corrio contra linux-x64-thermostat-no-ble y contra linux-x64-all-clusters-no-ble
 # no asi el yaml Test_TC_TSTAT_2_2.yaml que solo corrio contra thermostat
@@ -68,13 +66,13 @@ class TC_TSTAT_2_2(MatterBaseTest):
         steps = [
             TestStep("1", "Commissioning, already done",
                      is_commissioning=True),
-            TestStep("2a", "Test Harness Client reads OccupiedCoolingSetpoint from Server DUT and verifies that the value is within range MinCoolSetpointLimit to MaxCoolSetpointLimit, writes a value back that is different but valid5, then reads it back again to confirm the successful write.",
+            TestStep("2a", "Test Harness Client reads OccupiedCoolingSetpoint from Server DUT and verifies that the value is within range MinCoolSetpointLimit to MaxCoolSetpointLimit, writes a value back that is different but valid, then reads it back again to confirm the successful write.",
                      " Verify that read value is be equal to the written value."),
-            TestStep("2b", "Test Harness Client then attempts to write OccupiedCoolingSetpoint below the MinCoolSetpointLimit and above the MaxCoolSetpointLimit and confirms that the device does not accept the value.",
-                     " Verify that Write command returns the error CONSTRAINT_ERROR (0x87)"),
-            TestStep("2c", "Test Harness Client then attempts to write OccupiedCoolingSetpoint to both of the limits of LowerLimit & MaxCoolSetpointLimit and confirms that the device does accept the value.",
-                     " Verify that Write command succeeds without an error"),
-            # TestStep("3a", "Test Harness Client reads OccupiedHeatingSetpoint from Server DUT and verifies that the value is within range MinHeatSetpointLimit to MaxHeatSetpointLimit, writes a value back that is different but valid5, then reads it back again to confirm the successful write.",
+            # TestStep("2b", "Test Harness Client then attempts to write OccupiedCoolingSetpoint below the MinCoolSetpointLimit and above the MaxCoolSetpointLimit and confirms that the device does not accept the value.",
+            #          " Verify that Write command returns the error CONSTRAINT_ERROR (0x87)"),
+            # TestStep("2c", "Test Harness Client then attempts to write OccupiedCoolingSetpoint to both of the limits of LowerLimit & MaxCoolSetpointLimit and confirms that the device does accept the value.",
+            #          " Verify that Write command succeeds without an error"),
+            # TestStep("3a", "Test Harness Client reads OccupiedHeatingSetpoint from Server DUT and verifies that the value is within range MinHeatSetpointLimit to MaxHeatSetpointLimit, writes a value back that is different but valid, then reads it back again to confirm the successful write.",
             #          " Verify that read value is be equal to the written value."),
             # TestStep("3b", "Test Harness Client then attempts to write OccupiedHeatingSetpoint below the MinHeatSetpointLimit and above the MaxHeatSetpointLimit and confirms that the device does not accept the value.",
             #          " Verify that Write command returns the error CONSTRAINT_ERROR (0x87)"),
@@ -122,26 +120,14 @@ class TC_TSTAT_2_2(MatterBaseTest):
 
         return steps
 
-    @ async_test_body
+    @async_test_body
     async def test_TC_TSTAT_2_2(self):
-        endpoint = self.get_endpoint()
+        cluster = Clusters.Thermostat
+        endpoint = self.get_endpoint(1)
+        attr = cluster.Attributes
 
         self.step("1")
         # Commission DUT - already done
-
-        logger.info("Commissioning under second controller")
-        params = await self.default_controller.OpenCommissioningWindow(
-            nodeid=self.dut_node_id, timeout=600, iteration=10000, discriminator=1234, option=1)
-
-        secondary_authority = self.certificate_authority_manager.NewCertificateAuthority()
-        secondary_fabric_admin = secondary_authority.NewFabricAdmin(vendorId=0xFFF1, fabricId=2)
-        secondary_controller = secondary_fabric_admin.NewController(nodeId=112233)
-
-        await secondary_controller.CommissionOnNetwork(
-            nodeId=self.dut_node_id, setupPinCode=params.setupPinCode,
-            filterType=ChipDeviceCtrl.DiscoveryFilterType.LONG_DISCRIMINATOR, filter=1234)
-
-        # secondary_fabric_index = await self.read_single_attribute_check_success(dev_ctrl=secondary_controller, endpoint=0, cluster=Clusters.Objects.OperationalCredentials, attribute=Clusters.OperationalCredentials.Attributes.CurrentFabricIndex)
 
         minHeatSetpointLimit = 700
         maxHeatSetpointLimit = 3000
@@ -155,6 +141,7 @@ class TC_TSTAT_2_2(MatterBaseTest):
         occupiedCoolingSetpoint = 2400
         occupiedHeatingSetpoint = 2400
         unoccupiedCoolingSetpoint = 2400
+        unoccupiedHeatingSetpoint = 2400
 
         supportsHeat = self.check_pics("TSTAT.S.F00")
         supportsCool = self.check_pics("TSTAT.S.F01")
@@ -163,16 +150,17 @@ class TC_TSTAT_2_2(MatterBaseTest):
         if supportsCool:
             # Saving value for comparision in step 2a read MinCoolSetpointLimit
             if self.check_pics("TSTAT.S.A0017"):
-                minCoolSetpointLimit = await self.read_single_attribute_check_success(endpoint=endpoint, cluster=cluster, attribute=cluster.Attributes.MinCoolSetpointLimit)
+                minCoolSetpointLimit = await self.read_single_attribute_check_success(endpoint=endpoint, cluster=cluster, attribute=attr.MinCoolSetpointLimit)
+                # minCoolSetpointLimit = await self.read_single_attribute(dev_ctrl=dev)
             # Saving value for comparision in step 2a read MaxCoolSetpointLimit
             if self.check_pics("TSTAT.S.A0018"):
-                maxCoolSetpointLimit = await self.read_single_attribute_check_success(endpoint=endpoint, cluster=cluster, attribute=cluster.Attributes.MaxCoolSetpointLimit)
+                maxCoolSetpointLimit = await self.read_single_attribute_check_success(endpoint=endpoint, cluster=cluster, attribute=attr.MaxCoolSetpointLimit)
             # Saving value for comparision in step 8a read attribute AbsMinCoolSetpointLimit
             if self.check_pics("TSTAT.S.A0005"):
-                absMinCoolSetpointLimit = await self.read_single_attribute_check_success(endpoint=endpoint, cluster=cluster, attribute=cluster.Attributes.AbsMinCoolSetpointLimit)
+                absMinCoolSetpointLimit = await self.read_single_attribute_check_success(endpoint=endpoint, cluster=cluster, attribute=attr.AbsMinCoolSetpointLimit)
             # Saving value for comparision in step9a read attribute AbsMaxCoolSetpointLimit
             if self.check_pics("TSTAT.S.A0006"):
-                absMaxCoolSetpointLimit = await self.read_single_attribute_check_success(endpoint=endpoint, cluster=cluster, attribute=cluster.Attributes.AbsMaxCoolSetpointLimit)
+                absMaxCoolSetpointLimit = await self.read_single_attribute_check_success(endpoint=endpoint, cluster=cluster, attribute=attr.AbsMaxCoolSetpointLimit)
 
             asserts.assert_true(minCoolSetpointLimit <= maxCoolSetpointLimit, "User cool setpoint invalid range")
             asserts.assert_true(absMinCoolSetpointLimit <= absMaxCoolSetpointLimit, "Device cool setpoint invalid range")
@@ -182,16 +170,16 @@ class TC_TSTAT_2_2(MatterBaseTest):
         if supportsHeat:
             # Saving value for comparision in step 3a read MinHeatSetpointLimit
             if self.check_pics("TSTAT.S.A0015"):
-                minHeatSetpointLimit = await self.read_single_attribute_check_success(endpoint=endpoint, cluster=cluster, attribute=cluster.Attributes.MinHeatSetpointLimit)
+                minHeatSetpointLimit = await self.read_single_attribute_check_success(endpoint=endpoint, cluster=cluster, attribute=attr.MinHeatSetpointLimit)
             # Saving value for comparision in step 3a read MaxHeatSetpointLimit
             if self.check_pics("TSTAT.S.A0016"):
-                maxHeatSetpointLimit = await self.read_single_attribute_check_success(endpoint=endpoint, cluster=cluster, attribute=cluster.Attributes.MaxHeatSetpointLimit)
+                maxHeatSetpointLimit = await self.read_single_attribute_check_success(endpoint=endpoint, cluster=cluster, attribute=attr.MaxHeatSetpointLimit)
             # Saving value for comparision in step 6a read attribute AbsMinHeatSetpointLimit
             if self.check_pics("TSTAT.S.A0003"):
-                absMinHeatSetpointLimit = await self.read_single_attribute_check_success(endpoint=endpoint, cluster=cluster, attribute=cluster.Attributes.AbsMinHeatSetpointLimit)
+                absMinHeatSetpointLimit = await self.read_single_attribute_check_success(endpoint=endpoint, cluster=cluster, attribute=attr.AbsMinHeatSetpointLimit)
             # Saving value for comparision in step 7a read attribute AbsMaxHeatSetpointLimit
             if self.check_pics("TSTAT.S.A0004"):
-                absMaxHeatSetpointLimit = await self.read_single_attribute_check_success(endpoint=endpoint, cluster=cluster, attribute=cluster.Attributes.AbsMaxHeatSetpointLimit)
+                absMaxHeatSetpointLimit = await self.read_single_attribute_check_success(endpoint=endpoint, cluster=cluster, attribute=attr.AbsMaxHeatSetpointLimit)
 
             asserts.assert_true(minHeatSetpointLimit <= maxHeatSetpointLimit, "User heat setpoint invalid range")
             asserts.assert_true(absMinHeatSetpointLimit <= absMaxHeatSetpointLimit, "Device heat setpoint invalid range")
@@ -200,7 +188,7 @@ class TC_TSTAT_2_2(MatterBaseTest):
 
         # Saving value for comparision in step 2c read attribute MinSetpointDeadBand
         if supportsAuto and self.check_pics("TSTAT.S.A0019"):
-            minSetpointDeadBand = await self.read_single_attribute_check_success(endpoint=endpoint, cluster=cluster, attribute=cluster.Attributes.MinSetpointDeadBand)
+            minSetpointDeadBand = await self.read_single_attribute_check_success(endpoint=endpoint, cluster=cluster, attribute=attr.MinSetpointDeadBand)
 
             asserts.assert_true(absMinHeatSetpointLimit <= (absMinCoolSetpointLimit - minSetpointDeadBand),
                                 "Invalid device minimum heat setpoint deadband")
@@ -216,45 +204,67 @@ class TC_TSTAT_2_2(MatterBaseTest):
 
         supportsOccupancy = self.check_pics("TSTAT.S.F02")
         if supportsOccupancy:
-            occupied = await self.read_single_attribute_check_success(endpoint=endpoint, cluster=cluster, attribute=cluster.Attributes.Occupancy) & 1
-
-            # Saving value for comparision in step 3c read attribute OccupiedCoolingSetpoint
-            if self.check_pics("TSTAT.S.A0011"):
-                occupiedCoolingSetpoint = await self.read_single_attribute_check_success(endpoint=endpoint, cluster=cluster, attribute=cluster.Attributes.OccupiedCoolingSetpoint)
-
-            # Saving value for comparision in step3c read attribute OccupiedHeatingSetpoint
-            if self.check_pics("TSTAT.S.A0012"):
-                occupiedHeatingSetpoint = await self.read_single_attribute_check_success(endpoint=endpoint, cluster=cluster, attribute=cluster.Attributes.OccupiedHeatingSetpoint)
-
-            # Saving value for comparision in step 3 reads UnoccupiedCoolingSetpoint attribute
-            if self.check_pics("TSTAT.S.A0013"):
-                unoccupiedCoolingSetpoint = await self.read_single_attribute_check_success(endpoint=endpoint, cluster=cluster, attribute=cluster.Attributes.UnoccupiedCoolingSetpoint)
-
-            # not reading unoccupiedHeatingSetpoint
-            if self.check_pics("TSTAT.S.A0014"):
-                pass
+            occupied = await self.read_single_attribute_check_success(endpoint=endpoint, cluster=cluster, attribute=attr.Occupancy) & 1
 
         # Target setpoints
-        # heatSetpoint = minHeatSetpointLimit + ((maxHeatSetpointLimit - minHeatSetpointLimit) / 2)
-        # coolSetpoint = minCoolSetpointLimit + ((maxCoolSetpointLimit - minCoolSetpointLimit) / 2)
+        heatSetpoint = minHeatSetpointLimit + ((maxHeatSetpointLimit - minHeatSetpointLimit) / 2)
+        coolSetpoint = minCoolSetpointLimit + ((maxCoolSetpointLimit - minCoolSetpointLimit) / 2)
 
         # Set the heating and cooling setpoints to something other than the target setpoints
-        # if occupied:
-        #     if supportsHeat:
-        #         await self.write_single_attribute(attribute_value=cluster.Attributes.OccupiedHeatingSetpoint(heatSetpoint-1), endpoint_id=endpoint)
-        #     if supportsCool:
-        #         await self.write_single_attribute(attribute_value=cluster.Attributes.OccupiedCoolingSetpoint(coolSetpoint-1), endpoint_id=endpoint)
-        # else:
-        #     if supportsHeat:
-        #         await self.write_single_attribute(attribute_value=cluster.Attributes.UnoccupiedHeatingSetpoint(heatSetpoint-1), endpoint_id=endpoint)
-        #     if supportsCool:
-        #         await self.write_single_attribute(attribute_value=cluster.Attributes.UnoccupiedCoolingSetpoint(coolSetpoint-1), endpoint_id=endpoint)
+        if occupied:
+            if supportsHeat:
+                await self.write_single_attribute(attribute_value=attr.OccupiedHeatingSetpoint(heatSetpoint), endpoint_id=endpoint)
+            if supportsCool:
+                await self.write_single_attribute(attribute_value=attr.OccupiedCoolingSetpoint(coolSetpoint), endpoint_id=endpoint)
+        else:
+            if supportsHeat:
+                await self.write_single_attribute(attribute_value=attr.UnoccupiedHeatingSetpoint(heatSetpoint), endpoint_id=endpoint)
+            if supportsCool:
+                await self.write_single_attribute(attribute_value=attr.UnoccupiedCoolingSetpoint(coolSetpoint), endpoint_id=endpoint)
+
+        # if supportsOccupancy:
+        #     # Saving value for comparision in step 3c read attribute OccupiedCoolingSetpoint
+        #     if self.check_pics("TSTAT.S.A0011"):
+        #         occupiedCoolingSetpoint = await self.read_single_attribute_check_success(endpoint=endpoint, cluster=cluster, attribute=attr.OccupiedCoolingSetpoint)
+
+        #     # Saving value for comparision in step3c read attribute OccupiedHeatingSetpoint
+        #     if self.check_pics("TSTAT.S.A0012"):
+        #         occupiedHeatingSetpoint = await self.read_single_attribute_check_success(endpoint=endpoint, cluster=cluster, attribute=attr.OccupiedHeatingSetpoint)
+
+        #     # Saving value for comparision in step 3 reads UnoccupiedCoolingSetpoint attribute
+        #     if self.check_pics("TSTAT.S.A0013"):
+        #         unoccupiedCoolingSetpoint = await self.read_single_attribute_check_success(endpoint=endpoint, cluster=cluster, attribute=attr.UnoccupiedCoolingSetpoint)
+
+        #     # not reading unoccupiedHeatingSetpoint
+        #     if self.check_pics("TSTAT.S.A0014"):
+        #         pass
 
         self.step("2a")
 
-        self.step("2b")
-        self.step("2c")
+        if supportsCool:
+            # Step 2a: Test Harness Client reads OccupiedCoolingSetpoint attribute from Server DUT and
+            # verifies that the value is within range MinCoolSetpointLimit to MaxCoolSetpointLimit
+            if self.check_pics("TSTAT.S.A0011"):
+                occupiedCoolingSetpoint = await self.read_single_attribute_check_success(endpoint=endpoint, cluster=cluster, attribute=attr.OccupiedCoolingSetpoint)
+            logger.info(f"Verifying occupied cooling setpoint: {occupiedCoolingSetpoint} is between limits")
+            asserts.assert_true(minCoolSetpointLimit <= occupiedCoolingSetpoint,
+                                "Occupied cooling setpoint is lower than minimum cooling setpoint limit")
+            asserts.assert_true(occupiedCoolingSetpoint <= maxCoolSetpointLimit,
+                                "Occupied cooling setpoint is greater than maximum cooling setpoint limit")
+
+            # Step 2a: Test Harness Client then attempts to write a value back that is different but valid for OccupiedCoolingSetpoint attribute
+            logger.info("Writing back a value that is different but valid for occupied cooling setpoint")
+            await self.write_single_attribute(attribute_value=cluster.Attributes.OccupiedCoolingSetpoint(coolSetpoint-1), endpoint_id=endpoint)
+
+            # Step 2a: Test Harness Client reads it back again to confirm the successful write of OccupiedCoolingSetpoint attribute
+            newOccupiedCoolingSetpoint = await self.read_single_attribute_check_success(cluster=cluster, endpoint=endpoint, attribute=attr.OccupiedCoolingSetpoint)
+            logger.info(f"Verifying new occupied cooling setpoint: {newOccupiedCoolingSetpoint}")
+            asserts.assert_true(newOccupiedCoolingSetpoint == (coolSetpoint - 1),
+                                "Written and read occupied cooling setpoints are not the same")
+
+        # self.step("2b")
 
 
+        # self.step("2c")
 if __name__ == "__main__":
     default_matter_test_main()
