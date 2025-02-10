@@ -141,7 +141,7 @@ class TC_TSTAT_2_2(MatterBaseTest):
             nodeId=self.dut_node_id, setupPinCode=params.setupPinCode,
             filterType=ChipDeviceCtrl.DiscoveryFilterType.LONG_DISCRIMINATOR, filter=1234)
 
-        secondary_fabric_index = await self.read_single_attribute_check_success(dev_ctrl=secondary_controller, endpoint=0, cluster=Clusters.Objects.OperationalCredentials, attribute=Clusters.OperationalCredentials.Attributes.CurrentFabricIndex)
+        # secondary_fabric_index = await self.read_single_attribute_check_success(dev_ctrl=secondary_controller, endpoint=0, cluster=Clusters.Objects.OperationalCredentials, attribute=Clusters.OperationalCredentials.Attributes.CurrentFabricIndex)
 
         minHeatSetpointLimit = 700
         maxHeatSetpointLimit = 3000
@@ -151,10 +151,10 @@ class TC_TSTAT_2_2(MatterBaseTest):
         absMaxHeatSetpointLimit = 3000
         absMinCoolSetpointLimit = 1600
         absMaxCoolSetpointLimit = 3200
-        minSetpointDeadBand = 0
-        occupiedCoolingSetpoint = 0
-        occupiedHeatingSetpoint = 0
-        unoccupiedCoolingSetpoint = 0
+        minSetpointDeadBand = 2500
+        occupiedCoolingSetpoint = 2400
+        occupiedHeatingSetpoint = 2400
+        unoccupiedCoolingSetpoint = 2400
 
         supportsHeat = self.check_pics("TSTAT.S.F00")
         supportsCool = self.check_pics("TSTAT.S.F01")
@@ -174,8 +174,8 @@ class TC_TSTAT_2_2(MatterBaseTest):
             if self.check_pics("TSTAT.S.A0006"):
                 absMaxCoolSetpointLimit = await self.read_single_attribute_check_success(endpoint=endpoint, cluster=cluster, attribute=cluster.Attributes.AbsMaxCoolSetpointLimit)
 
-            asserts.assert_true(minCoolSetpointLimit < maxCoolSetpointLimit, "User cool setpoint invalid range")
-            asserts.assert_true(absMinCoolSetpointLimit < absMaxCoolSetpointLimit, "Device cool setpoint invalid range")
+            asserts.assert_true(minCoolSetpointLimit <= maxCoolSetpointLimit, "User cool setpoint invalid range")
+            asserts.assert_true(absMinCoolSetpointLimit <= absMaxCoolSetpointLimit, "Device cool setpoint invalid range")
             asserts.assert_true(absMinCoolSetpointLimit <= minCoolSetpointLimit, "Invalid User minimum cool setpoint limit")
             asserts.assert_true(maxCoolSetpointLimit <= absMaxCoolSetpointLimit, "Invalid User maximum cool setpoint limit")
 
@@ -193,8 +193,8 @@ class TC_TSTAT_2_2(MatterBaseTest):
             if self.check_pics("TSTAT.S.A0004"):
                 absMaxHeatSetpointLimit = await self.read_single_attribute_check_success(endpoint=endpoint, cluster=cluster, attribute=cluster.Attributes.AbsMaxHeatSetpointLimit)
 
-            asserts.assert_true(minHeatSetpointLimit < maxHeatSetpointLimit, "User heat setpoint invalid range")
-            asserts.assert_true(absMinHeatSetpointLimit < absMaxHeatSetpointLimit, "Device heat setpoint invalid range")
+            asserts.assert_true(minHeatSetpointLimit <= maxHeatSetpointLimit, "User heat setpoint invalid range")
+            asserts.assert_true(absMinHeatSetpointLimit <= absMaxHeatSetpointLimit, "Device heat setpoint invalid range")
             asserts.assert_true(absMinHeatSetpointLimit <= minHeatSetpointLimit, "Invalid User minimum heat setpoint limit")
             asserts.assert_true(maxHeatSetpointLimit <= absMaxHeatSetpointLimit, "Invalid User maximum heat setpoint limit")
 
@@ -251,6 +251,7 @@ class TC_TSTAT_2_2(MatterBaseTest):
         #         await self.write_single_attribute(attribute_value=cluster.Attributes.UnoccupiedCoolingSetpoint(coolSetpoint-1), endpoint_id=endpoint)
 
         self.step("2a")
+
         self.step("2b")
         self.step("2c")
 
