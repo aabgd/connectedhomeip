@@ -50,8 +50,6 @@ from mobly import asserts
 logger = logging.getLogger(__name__)
 
 
-# corrio contra linux-x64-thermostat-no-ble y contra linux-x64-all-clusters-no-ble
-# no asi el yaml Test_TC_TSTAT_2_2.yaml que solo corrio contra thermostat
 class TC_TSTAT_2_2(MatterBaseTest):
 
     def desc_TC_TSTAT_2_2(self) -> str:
@@ -70,8 +68,8 @@ class TC_TSTAT_2_2(MatterBaseTest):
                      " Verify that read value is be equal to the written value."),
             TestStep("2b", "Test Harness Client then attempts to write OccupiedCoolingSetpoint below the MinCoolSetpointLimit and above the MaxCoolSetpointLimit and confirms that the device does not accept the value.",
                      " Verify that Write command returns the error CONSTRAINT_ERROR (0x87)"),
-            # TestStep("2c", "Test Harness Client then attempts to write OccupiedCoolingSetpoint to both of the limits of LowerLimit & MaxCoolSetpointLimit and confirms that the device does accept the value.",
-            #          " Verify that Write command succeeds without an error"),
+            TestStep("2c", "Test Harness Client then attempts to write OccupiedCoolingSetpoint to both of the limits of LowerLimit & MaxCoolSetpointLimit and confirms that the device does accept the value.",
+                     " Verify that Write command succeeds without an error"),
             # TestStep("3a", "Test Harness Client reads OccupiedHeatingSetpoint from Server DUT and verifies that the value is within range MinHeatSetpointLimit to MaxHeatSetpointLimit, writes a value back that is different but valid, then reads it back again to confirm the successful write.",
             #          " Verify that read value is be equal to the written value."),
             # TestStep("3b", "Test Harness Client then attempts to write OccupiedHeatingSetpoint below the MinHeatSetpointLimit and above the MaxHeatSetpointLimit and confirms that the device does not accept the value.",
@@ -204,9 +202,9 @@ class TC_TSTAT_2_2(MatterBaseTest):
         supportsOccupancy = self.check_pics("TSTAT.S.F02")
         if supportsOccupancy:
             occupied = await self.read_single_attribute_check_success(endpoint=endpoint, cluster=cluster, attribute=attr.Occupancy) & 1
-            logger.info("**** Supports Occupancy ****")
+            logger.info("---- Supports Occupancy ----")
         else:
-            logger.info("**** Does NOT support Occupancy: setting default to 'occupied' ****")
+            logger.info("---- Does NOT support Occupancy: setting default to 'occupied' ----")
 
         # Target setpoints
         heatSetpoint = minHeatSetpointLimit + ((maxHeatSetpointLimit - minHeatSetpointLimit) / 2)
@@ -288,7 +286,25 @@ class TC_TSTAT_2_2(MatterBaseTest):
             expectedStatus = await self.write_single_attribute(attribute_value=attr.OccupiedCoolingSetpoint(targetValue), endpoint_id=endpoint, expect_success=False)
             asserts.assert_equal(expectedStatus, Status.ConstraintError, f"Expected CONSTRAINT_ERROR but got {expectedStatus}")
 
-        # self.step("2c")
+        self.step("2c")
+
+        if supportsCool:
+            # Step 2c: Test Harness Client then attempts to write OccupiedCoolingSetpoint to both of the limits
+            # of LowerLimit & MaxCoolSetpointLimit and confirms that the device does accept the value
+
+            # Step 2c: Test Harness Writes the limit of MaxCoolSetpointLimit to OccupiedCoolingSetpoint attribute
+            logger.info(f"2c: Trying to write MaxCoolSetpointLimit ({maxCoolSetpointLimit}) to OccupiedCoolingSetpoint")
+            expectedStatus = await self.write_single_attribute(attribute_value=attr.OccupiedCoolingSetpoint(maxCoolSetpointLimit), endpoint_id=endpoint)
+            asserts.assert_equal(expectedStatus, Status.Success, f"2b: Expected SUCCESS but got {expectedStatus}")
+
+            # Step 2c:  Test Harness Writes the lower Limit to OccupiedCoolingSetpoint attribute
+            if supportsAuto:
+                lowerLimit = max(minCoolSetpointLimit, (occupiedHeatingSetpoint + minSetpointDeadBand))
+            else:
+                lowerLimit = minCoolSetpointLimit
+            logger.info(f"2c: Trying to write lowerLimit ({lowerLimit}) to OccupiedCoolingSetpoint")
+            expectedStatus = await self.write_single_attribute(attribute_value=attr.OccupiedCoolingSetpoint(lowerLimit), endpoint_id=endpoint)
+            asserts.assert_equal(expectedStatus, Status.Success, f"2b: Expected SUCCESS but got {expectedStatus}")
 
 
 if __name__ == "__main__":
