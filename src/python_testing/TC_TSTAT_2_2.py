@@ -135,7 +135,7 @@ class TC_TSTAT_2_2(MatterBaseTest):
         absMaxHeatSetpointLimit = 3000
         absMinCoolSetpointLimit = 1600
         absMaxCoolSetpointLimit = 3200
-        minSetpointDeadBand = 2500
+        minSetpointDeadBand = 25
         occupiedCoolingSetpoint = 2400
         occupiedHeatingSetpoint = 2400
         unoccupiedCoolingSetpoint = 2400
@@ -276,7 +276,6 @@ class TC_TSTAT_2_2(MatterBaseTest):
             logger.info(
                 f"2b: Trying to write OccupiedCoolingSetpoint ({targetValue}) to a value below MinCoolSetPointLimit ({minCoolSetpointLimit})")
             expectedStatus = await self.write_single_attribute(attribute_value=attr.OccupiedCoolingSetpoint(targetValue), endpoint_id=endpoint, expect_success=False)
-            logger.info(f"2b: Got {expectedStatus} status.")
             asserts.assert_equal(expectedStatus, Status.ConstraintError, f"Expected CONSTRAINT_ERROR but got {expectedStatus}")
 
             # Step 2b: Test Harness Writes OccupiedCoolingSetpoint to value above the MaxCoolSetpointLimit
@@ -298,13 +297,13 @@ class TC_TSTAT_2_2(MatterBaseTest):
             asserts.assert_equal(expectedStatus, Status.Success, f"2b: Expected SUCCESS but got {expectedStatus}")
 
             # Step 2c:  Test Harness Writes the lower Limit to OccupiedCoolingSetpoint attribute
-            if supportsAuto:
-                lowerLimit = max(minCoolSetpointLimit, (occupiedHeatingSetpoint + minSetpointDeadBand))
-            else:
-                lowerLimit = minCoolSetpointLimit
-            logger.info(f"2c: Trying to write lowerLimit ({lowerLimit}) to OccupiedCoolingSetpoint")
-            expectedStatus = await self.write_single_attribute(attribute_value=attr.OccupiedCoolingSetpoint(lowerLimit), endpoint_id=endpoint)
-            asserts.assert_equal(expectedStatus, Status.Success, f"2b: Expected SUCCESS but got {expectedStatus}")
+        if supportsAuto:
+            lowerLimit = max(minCoolSetpointLimit, (occupiedHeatingSetpoint + minSetpointDeadBand))
+        else:
+            lowerLimit = minCoolSetpointLimit
+        logger.info(f"2c: Trying to write lowerLimit ({lowerLimit}) to OccupiedCoolingSetpoint")
+        expectedStatus = await self.write_single_attribute(attribute_value=attr.OccupiedCoolingSetpoint(lowerLimit), endpoint_id=endpoint)
+        asserts.assert_equal(expectedStatus, Status.Success, f"2b: Expected SUCCESS but got {expectedStatus}")
 
 
 if __name__ == "__main__":
