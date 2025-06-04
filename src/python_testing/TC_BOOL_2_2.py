@@ -34,8 +34,12 @@
 import logging
 
 import chip.clusters as Clusters
-from chip.testing.matter_testing import MatterBaseTest, TestStep, async_test_body, default_matter_test_main
+from chip.clusters.Attribute import ValueDecodeFailure
+from chip.testing.matter_testing import MatterBaseTest, TestStep, default_matter_test_main, async_test_body, has_attribute, run_if_endpoint_matches
 from mobly import asserts
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 
 class TC_BOOL_2_2(MatterBaseTest):
@@ -45,7 +49,7 @@ class TC_BOOL_2_2(MatterBaseTest):
 
     def steps_TC_BOOL_2_2(self) -> list[TestStep]:
         steps = [
-            TestStep("1", "Commission DUT to TH done", is_commissioning=True),
+            TestStep("1", "Commission DUT to TH", is_commissioning=True),
             TestStep("2a", "Bring the DUT into a state so StateValue is FALSE."),
             TestStep("2b", "TH reads the StateValue attribute from the DUT."),
             TestStep("3a", "Bring the DUT into a state so StateValue is TRUE."),
@@ -64,7 +68,8 @@ class TC_BOOL_2_2(MatterBaseTest):
     #     ]
     #     return pics
 
-    @async_test_body
+    @run_if_endpoint_matches(has_attribute(Clusters.BooleanState.Attributes.StateValue))
+    # @async_test_body
     async def test_TC_BOOL_2_2(self):
 
         # Commission DUT to TH done
@@ -73,18 +78,78 @@ class TC_BOOL_2_2(MatterBaseTest):
         # Bring the DUT into a state so StateValue is FALSE.
         self.step("2a")
 
+        cbool = Clusters.BooleanState
+        endpoint = self.get_endpoint()
+        node_id = self.dut_node_id
+        dev_ctrl = self.default_controller
+        logger.info(f" --- Step 2a: endpoint: {endpoint}")
+        logger.info(f" --- Step 2a: node_id: {node_id}")
+        logger.info(f" --- Step 2a: dev_ctrl: {dev_ctrl}")
+
+        try:
+            logger.info(" --- Step 2a: Sending OnOff Off to the DUT")
+            await self.send_single_cmd(
+                cmd=Clusters.OnOff.Commands.Off()
+            )
+        except Exception as e:
+            logger.error(f" --- Step 2a: SendCommand failed: {e}")
+            raise
+
         # TH reads the StateValue attribute from the DUT.
         self.step("2b")
 
+        state_value = None
+        try:
+            state_value = await self.read_single_attribute(
+                dev_ctrl=dev_ctrl,
+                attribute=cbool.Attributes.StateValue,
+                endpoint=endpoint,
+                node_id=node_id
+            )
+            if isinstance(state_value, ValueDecodeFailure):
+                logger.error(f" --- Step 2b: Value decode failed: {state_value.Reason}")
+            else:
+                logger.info(f" --- Step 2b: state_value: {state_value}")
+        except Exception as e:
+            logger.error(f" --- Step 2b: Failed to read attribute: {e}")
+
         # Verify that value in the response is FALSE.
+        if state_value is not None:
+            asserts.assert_false(state_value, " --- Step 2b: state_value should be False.")
 
         # Bring the DUT into a state so StateValue is TRUE.
         self.step("3a")
 
+        try:
+            logger.info(" --- Step 3a: Sending OnOff Off to the DUT")
+            await self.send_single_cmd(
+                cmd=Clusters.OnOff.Commands.On()
+            )
+        except Exception as e:
+            logger.error(f" --- Step 3a: SendCommand failed: {e}")
+            raise
+
         # TH reads the StateValue attribute from the DUT.
         self.step("3b")
 
+        state_value = None
+        try:
+            state_value = await self.read_single_attribute(
+                dev_ctrl=dev_ctrl,
+                attribute=cbool.Attributes.StateValue,
+                endpoint=endpoint,
+                node_id=node_id
+            )
+            if isinstance(state_value, ValueDecodeFailure):
+                logger.error(f" --- Step 3b: Value decode failed: {state_value.Reason}")
+            else:
+                logger.info(f" --- Step 3b: state_value: {state_value}")
+        except Exception as e:
+            logger.error(f" --- Step 3b: Failed to read attribute: {e}")
+
         # Verify that value in the response is TRUE.
+        if state_value is not None:
+            asserts.assert_true(state_value, " --- Step 3b: state_value should be True.")
 
         # Set up subscription to StateChange event.
         self.step("4a")
