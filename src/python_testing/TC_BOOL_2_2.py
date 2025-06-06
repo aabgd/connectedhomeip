@@ -31,6 +31,7 @@
 #     quiet: true
 # === END CI TEST ARGUMENTS ===
 
+import asyncio
 import logging
 
 import chip.clusters as Clusters
@@ -51,14 +52,16 @@ class TC_BOOL_2_2(MatterBaseTest):
         steps = [
             TestStep("1", "Commission DUT to TH", is_commissioning=True),
             TestStep("2a", "Bring the DUT into a state so StateValue is FALSE."),
-            TestStep("2b", "TH reads the StateValue attribute from the DUT."),
+            TestStep("2b", "TH reads the StateValue attribute from the DUT.", "Verify that value in the response is FALSE."),
             TestStep("3a", "Bring the DUT into a state so StateValue is TRUE."),
-            TestStep("3b", "TH reads the StateValue attribute from the DUT."),
+            TestStep("3b", "TH reads the StateValue attribute from the DUT.", "Verify that value in the response is TRUE."),
             TestStep("4a", "Set up subscription to StateChange event."),
-            TestStep("4b", "Bring the DUT into a state so StateValue is FALSE."),
-            TestStep("4c", "TH reads the StateValue attribute from the DUT."),
-            TestStep("4d", "Bring the DUT into a state so StateValue is TRUE."),
-            TestStep("4e", "TH reads the StateValue attribute from the DUT."),
+            TestStep("4b", "Bring the DUT into a state so StateValue is FALSE.",
+                     "Receive StateChange event with StateValue set to FALSE."),
+            TestStep("4c", "TH reads the StateValue attribute from the DUT.", "Verify that value in the response is FALSE."),
+            TestStep("4d", "Bring the DUT into a state so StateValue is TRUE.",
+                     "Receive StateChange event with StateValue set to TRUE."),
+            TestStep("4e", "TH reads the StateValue attribute from the DUT.", "Verify that value in the response is TRUE."),
         ]
         return steps
 
@@ -69,7 +72,6 @@ class TC_BOOL_2_2(MatterBaseTest):
     #     return pics
 
     @run_if_endpoint_matches(has_attribute(Clusters.BooleanState.Attributes.StateValue))
-    # @async_test_body
     async def test_TC_BOOL_2_2(self):
 
         # Commission DUT to TH done
@@ -121,10 +123,11 @@ class TC_BOOL_2_2(MatterBaseTest):
         self.step("3a")
 
         try:
-            logger.info(" --- Step 3a: Sending OnOff Off to the DUT")
+            logger.info(" --- Step 3a: Sending OnOff On to the DUT")
             await self.send_single_cmd(
                 cmd=Clusters.OnOff.Commands.On()
             )
+            asyncio.sleep(5)
         except Exception as e:
             logger.error(f" --- Step 3a: SendCommand failed: {e}")
             raise
@@ -146,6 +149,10 @@ class TC_BOOL_2_2(MatterBaseTest):
                 logger.info(f" --- Step 3b: state_value: {state_value}")
         except Exception as e:
             logger.error(f" --- Step 3b: Failed to read attribute: {e}")
+        finally:
+            await self.send_single_cmd(
+                cmd=Clusters.OnOff.Commands.Off()
+            )
 
         # Verify that value in the response is TRUE.
         if state_value is not None:
