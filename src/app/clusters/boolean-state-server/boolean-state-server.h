@@ -17,32 +17,58 @@
 
 #pragma once
 
+#include <app/util/af-types.h>
+// #include <app/util/basic-types.h>
+// #include <platform/CHIPDeviceConfig.h>
+
+
+namespace chip {
+namespace app {
+namespace Clusters {
+namespace BooleanState {
+
 
 /**
  * @brief
  *
  */
-class BooleanState
+class BooleanStateServer
 {
-    public:
+public:
 
-    /**********************************************************
-     * Functions Definitions
-     *********************************************************/
+    /**
+     * Creates an operational state cluster instance.
+     * The Init() function needs to be called for this instance to be registered and called by the
+     * interaction model at the appropriate times.
+     * It is possible to set the CurrentPhase and OperationalState via the Set... methods before calling Init().
+     * @param aDelegate A pointer to the delegate to be used by this server.
+     * Note: the caller must ensure that the delegate lives throughout the instance's lifetime.
+     * @param aEndpointId The endpoint on which this cluster exists. This must match the zap configuration.
+     */
+    static BooleanStateServer & Instance();
 
-    static BooleanState & Instance();
+    /**
+     * Set current state value to state and the operational error to kNoError.
+     * NOTE: This method cannot be used to set the error state. The error state must be set via the
+     * OnOperationalErrorDetected method.
+     * @param endpoint The operational state that should now be the current one.
+     * @return CHIP_ERROR_INVALID_ARGUMENT if endpoint and state are invalid values. CHIP_NO_ERROR if set was successful.
+     */
+    CHIP_ERROR SetStateValue(chip::EndpointId endpoint, bool state);
 
-    private:
+    /**
+     * Get the current boolean state.
+     * @return The current boolean state value.
+     */
+    bool GetStateValue(chip::EndpointId);
 
-    /**********************************************************
-     * Functions Definitions
-     *********************************************************/
+private:
 
-
-    /**********************************************************
-     * Attributes Declaration
-     *********************************************************/
-
-    static BooleanState instance;
-
+    BooleanStateServer() = default;
+    static BooleanStateServer instance;
 };
+
+} // namespace BooleanState
+} // namespace Clusters
+} // namespace app
+} // namespace chip

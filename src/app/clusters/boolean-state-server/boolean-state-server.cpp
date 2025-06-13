@@ -16,5 +16,27 @@
  */
 
 #include "boolean-state-server.h"
+#include <app/util/af-types.h>
 
-BooleanState BooleanState::instance;
+using namespace chip;
+using namespace chip::app;
+using namespace chip::app::Clusters::BooleanState;
+
+using Status = Protocols::InteractionModel::Status;
+
+BooleanStateServer & BooleanStateServer::Instance()
+{
+    static BooleanStateServer instance;
+    return instance;
+}
+
+CHIP_ERROR BooleanStateServer::SetStateValue(chip::EndpointId endpoint, bool state)
+{
+
+    return CHIP_NO_ERROR;
+}
+
+bool BooleanStateServer::GetStateValue(chip::EndpointId endpoint)
+{
+
+}
