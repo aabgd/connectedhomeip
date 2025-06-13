@@ -38,5 +38,5 @@ CHIP_ERROR BooleanStateServer::SetStateValue(chip::EndpointId endpoint, bool sta
 
 bool BooleanStateServer::GetStateValue(chip::EndpointId endpoint)
 {
-
+    return Attributes::StateValue::Id;
 }
