@@ -17,6 +17,13 @@
 
 #include "boolean-state-server.h"
 #include <app/util/af-types.h>
+#include <lib/support/CodeUtils.h>
+#include <lib/support/logging/CHIPLogging.h>
+#include <protocols/interaction_model/StatusCode.h>
+#include <app-common/zap-generated/attributes/Accessors.h>
+#include <app/EventLogging.h>
+
+
 
 using namespace chip;
 using namespace chip::app;
@@ -32,11 +39,61 @@ BooleanStateServer & BooleanStateServer::Instance()
 
 CHIP_ERROR BooleanStateServer::SetStateValue(chip::EndpointId endpoint, bool state)
 {
+    bool current;
+    Status status = Attributes::StateValue::Get(endpoint, &current);
+    if (status != Status::Success)
+    {
+        ChipLogError(AppServer, "Error reading attribute: %" PRIu8, static_cast<uint8_t>(status));
+        return CHIP_ERROR_READ_FAILED;
+    }
+
+    if (current == state)
+    {
+        return CHIP_NO_ERROR;
+    }
+
+    status = Attributes::StateValue::Set(endpoint, state);
+    if (status != Status::Success)
+    {
+        ChipLogError(AppServer, "Error writing attribute: %" PRIu8, static_cast<uint8_t>(status));
+        return CHIP_ERROR_WRITE_FAILED;
+    }
+
+    Events::StateChange::Type event;
+    event.stateValue = state;
+    EventNumber eventNumber;
+    CHIP_ERROR error = LogEvent(event, endpoint, eventNumber);
+
+    if (error != CHIP_NO_ERROR)
+    {
+        ChipLogError(Zcl, "BooleanStateServer: Failed to record StateChange event: %" CHIP_ERROR_FORMAT, error.Format());
+    }
+
+    if (mDelegate)
+    {
+        mDelegate->OnStateChanged(endpoint, state);
+    }
 
     return CHIP_NO_ERROR;
 }
 
-bool BooleanStateServer::GetStateValue(chip::EndpointId endpoint)
+CHIP_ERROR BooleanStateServer::GetStateValue(chip::EndpointId endpoint, bool &value)
 {
-    return Attributes::StateValue::Id;
+    Status status = Attributes::StateValue::Get(endpoint, &value);
+    if (status != Status::Success)
+    {
+        ChipLogError(AppServer, "Error reading attribute: %" PRIu8, static_cast<uint8_t>(status));
+        return CHIP_ERROR_READ_FAILED;
+    }
+    
+    return CHIP_NO_ERROR;
+}
+
+void BooleanStateServer::SetDelegate(Delegate * delegate)
+{
+    mDelegate = delegate;
+    if (mDelegate != nullptr)
+    {
+        mDelegate->SetInstance(this);
+    }
 }
