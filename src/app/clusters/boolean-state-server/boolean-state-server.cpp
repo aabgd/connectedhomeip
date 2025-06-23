@@ -15,6 +15,11 @@
  *    limitations under the License.
  */
 
+/****************************************************************************'
+ * @file
+ * @brief Implementation for the Boolean State Server Cluster
+ ***************************************************************************/
+
 #include "boolean-state-server.h"
 #include <app/util/af-types.h>
 #include <lib/support/CodeUtils.h>
@@ -24,12 +29,22 @@
 #include <app/EventLogging.h>
 
 
-
 using namespace chip;
 using namespace chip::app;
+using namespace chip::app::Clusters;
 using namespace chip::app::Clusters::BooleanState;
+using namespace chip::app::Clusters::BooleanState::Attributes;
 
 using Status = Protocols::InteractionModel::Status;
+
+BooleanStateServer::BooleanStateServer(Delegate * aDelegate, EndpointId aEndpointId, ClusterId aClusterId) :
+    mDelegate(aDelegate), mEndpointId(aEndpointId), mClusterId(aClusterId)
+{
+    mDelegate->SetInstance(this);
+}
+
+BooleanStateServer::BooleanStateServer(Delegate * aDelegate, EndpointId aEndpointId) : 
+    BooleanStateServer(aDelegate, aEndpointId, BooleanState::Id) {}
 
 BooleanStateServer & BooleanStateServer::Instance()
 {
@@ -37,10 +52,24 @@ BooleanStateServer & BooleanStateServer::Instance()
     return instance;
 }
 
-CHIP_ERROR BooleanStateServer::SetStateValue(chip::EndpointId endpoint, bool state)
+CHIP_ERROR BooleanStateServer::Init()
+{
+    // Check if the cluster has been selected in zap
+    if (!emberAfContainsServer(mEndpointId, mClusterId))
+    {
+        ChipLogError(Zcl, "Boolean State: The cluster with ID %lu was not enabled in zap.", long(mClusterId));
+        return CHIP_ERROR_INVALID_ARGUMENT;
+    }
+
+    VerifyOrReturnError(AttributeAccessInterfaceRegistry::Instance().Register(this), CHIP_ERROR_INCORRECT_STATE);
+
+    return CHIP_NO_ERROR;
+}
+
+CHIP_ERROR BooleanStateServer::SetStateValue(chip::EndpointId aEndpointId, bool state)
 {
     bool current;
-    Status status = Attributes::StateValue::Get(endpoint, &current);
+    Status status = Attributes::StateValue::Get(aEndpointId, &current);
     if (status != Status::Success)
     {
         ChipLogError(AppServer, "Error reading attribute: %" PRIu8, static_cast<uint8_t>(status));
@@ -52,7 +81,7 @@ CHIP_ERROR BooleanStateServer::SetStateValue(chip::EndpointId endpoint, bool sta
         return CHIP_NO_ERROR;
     }
 
-    status = Attributes::StateValue::Set(endpoint, state);
+    status = Attributes::StateValue::Set(aEndpointId, state);
     if (status != Status::Success)
     {
         ChipLogError(AppServer, "Error writing attribute: %" PRIu8, static_cast<uint8_t>(status));
@@ -62,7 +91,7 @@ CHIP_ERROR BooleanStateServer::SetStateValue(chip::EndpointId endpoint, bool sta
     Events::StateChange::Type event;
     event.stateValue = state;
     EventNumber eventNumber;
-    CHIP_ERROR error = LogEvent(event, endpoint, eventNumber);
+    CHIP_ERROR error = LogEvent(event, aEndpointId, eventNumber);
 
     if (error != CHIP_NO_ERROR)
     {
@@ -71,15 +100,15 @@ CHIP_ERROR BooleanStateServer::SetStateValue(chip::EndpointId endpoint, bool sta
 
     if (mDelegate)
     {
-        mDelegate->OnStateChanged(endpoint, state);
+        mDelegate->OnStateChanged(aEndpointId, state);
     }
 
     return CHIP_NO_ERROR;
 }
 
-CHIP_ERROR BooleanStateServer::GetStateValue(chip::EndpointId endpoint, bool &value)
+CHIP_ERROR BooleanStateServer::GetStateValue(chip::EndpointId aEndpointId, bool &value)
 {
-    Status status = Attributes::StateValue::Get(endpoint, &value);
+    Status status = Attributes::StateValue::Get(aEndpointId, &value);
     if (status != Status::Success)
     {
         ChipLogError(AppServer, "Error reading attribute: %" PRIu8, static_cast<uint8_t>(status));
