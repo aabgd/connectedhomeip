@@ -51,9 +51,8 @@ private:
     BooleanStateServer(const BooleanStateServer&) = delete;
     BooleanStateServer& operator=(const BooleanStateServer&) = delete;
 
-    // AttributeAccessInterface overrides
+    // AttributeAccessInterface override
     CHIP_ERROR Read(const ConcreteReadAttributePath & aPath, AttributeValueEncoder & aEncoder) override;
-    CHIP_ERROR Write(const ConcreteWriteAttributePath & aPath, AttributeValueDecoder & aDecoder) override;
 };
 
 class Delegate

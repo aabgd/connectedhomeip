@@ -129,15 +129,3 @@ CHIP_ERROR BooleanStateServer::Read(const ConcreteReadAttributePath & aPath, Att
 
     return CHIP_NO_ERROR;
 }
-
-CHIP_ERROR BooleanStateServer::Write(const ConcreteWriteAttributePath & aPath, AttributeValueDecoder & aDecoder)
-{
-    if (aPath.mAttributeId == Attributes::StateValue::Id)
-    {
-        bool value;
-        ReturnErrorOnFailure(aDecoder.Decode(value));
-        return SetStateValue(aPath.mEndpointId, value);
-    }
-
-    return CHIP_ERROR_UNSUPPORTED_CHIP_FEATURE;
-}
