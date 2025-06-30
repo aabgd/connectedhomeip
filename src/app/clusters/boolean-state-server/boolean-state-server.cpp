@@ -26,7 +26,10 @@
 #include <lib/support/logging/CHIPLogging.h>
 #include <protocols/interaction_model/StatusCode.h>
 #include <app-common/zap-generated/attributes/Accessors.h>
+#include <app-common/zap-generated/callback.h>
 #include <app/EventLogging.h>
+#include <app/util/attribute-storage.h>
+#include <app/AttributeAccessInterface.h>
 
 
 using namespace chip;
@@ -37,14 +40,6 @@ using namespace chip::app::Clusters::BooleanState::Attributes;
 
 using Status = Protocols::InteractionModel::Status;
 
-BooleanStateServer::BooleanStateServer(Delegate * aDelegate, EndpointId aEndpointId, ClusterId aClusterId) :
-    mDelegate(aDelegate), mEndpointId(aEndpointId), mClusterId(aClusterId)
-{
-    mDelegate->SetInstance(this);
-}
-
-BooleanStateServer::BooleanStateServer(Delegate * aDelegate, EndpointId aEndpointId) : 
-    BooleanStateServer(aDelegate, aEndpointId, BooleanState::Id) {}
 
 BooleanStateServer & BooleanStateServer::Instance()
 {
@@ -52,36 +47,41 @@ BooleanStateServer & BooleanStateServer::Instance()
     return instance;
 }
 
+BooleanStateServer::BooleanStateServer() :
+    AttributeAccessInterface(Optional<EndpointId>(), BooleanState::Id) 
+{}
+
 CHIP_ERROR BooleanStateServer::Init()
 {
-    // Check if the cluster has been selected in zap
-    if (!emberAfContainsServer(mEndpointId, mClusterId))
-    {
-        ChipLogError(Zcl, "Boolean State: The cluster with ID %lu was not enabled in zap.", long(mClusterId));
-        return CHIP_ERROR_INVALID_ARGUMENT;
-    }
-
     VerifyOrReturnError(AttributeAccessInterfaceRegistry::Instance().Register(this), CHIP_ERROR_INCORRECT_STATE);
-
     return CHIP_NO_ERROR;
 }
 
-CHIP_ERROR BooleanStateServer::SetStateValue(chip::EndpointId aEndpointId, bool state)
+void BooleanStateServer::SetDelegate(Delegate * delegate)
 {
-    bool current;
-    Status status = Attributes::StateValue::Get(aEndpointId, &current);
+    mDelegate = delegate;
+    if (mDelegate != nullptr)
+    {
+        mDelegate->SetInstance(this);
+    }
+}
+
+CHIP_ERROR BooleanStateServer::SetStateValue(EndpointId aEndpointId, bool newState)
+{
+    bool currState;
+    Status status = Attributes::StateValue::Get(aEndpointId, &currState);
     if (status != Status::Success)
     {
         ChipLogError(AppServer, "Error reading attribute: %" PRIu8, static_cast<uint8_t>(status));
         return CHIP_ERROR_READ_FAILED;
     }
 
-    if (current == state)
+    if (currState == newState)
     {
         return CHIP_NO_ERROR;
     }
 
-    status = Attributes::StateValue::Set(aEndpointId, state);
+    status = Attributes::StateValue::Set(aEndpointId, newState);
     if (status != Status::Success)
     {
         ChipLogError(AppServer, "Error writing attribute: %" PRIu8, static_cast<uint8_t>(status));
@@ -89,7 +89,7 @@ CHIP_ERROR BooleanStateServer::SetStateValue(chip::EndpointId aEndpointId, bool 
     }
 
     Events::StateChange::Type event;
-    event.stateValue = state;
+    event.stateValue = newState;
     EventNumber eventNumber;
     CHIP_ERROR error = LogEvent(event, aEndpointId, eventNumber);
 
@@ -100,13 +100,13 @@ CHIP_ERROR BooleanStateServer::SetStateValue(chip::EndpointId aEndpointId, bool 
 
     if (mDelegate)
     {
-        mDelegate->OnStateChanged(aEndpointId, state);
+        mDelegate->OnStateChanged(aEndpointId, newState);
     }
 
     return CHIP_NO_ERROR;
 }
 
-CHIP_ERROR BooleanStateServer::GetStateValue(chip::EndpointId aEndpointId, bool &value)
+CHIP_ERROR BooleanStateServer::GetStateValue(EndpointId aEndpointId, bool &value) const
 {
     Status status = Attributes::StateValue::Get(aEndpointId, &value);
     if (status != Status::Success)
@@ -118,11 +118,26 @@ CHIP_ERROR BooleanStateServer::GetStateValue(chip::EndpointId aEndpointId, bool 
     return CHIP_NO_ERROR;
 }
 
-void BooleanStateServer::SetDelegate(Delegate * delegate)
+CHIP_ERROR BooleanStateServer::Read(const ConcreteReadAttributePath & aPath, AttributeValueEncoder & aEncoder)
 {
-    mDelegate = delegate;
-    if (mDelegate != nullptr)
+    if (aPath.mAttributeId == Attributes::StateValue::Id)
     {
-        mDelegate->SetInstance(this);
+        bool value;
+        ReturnErrorOnFailure(GetStateValue(aPath.mEndpointId, value));
+        return aEncoder.Encode(value);
     }
+
+    return CHIP_NO_ERROR;
+}
+
+CHIP_ERROR BooleanStateServer::Write(const ConcreteWriteAttributePath & aPath, AttributeValueDecoder & aDecoder)
+{
+    if (aPath.mAttributeId == Attributes::StateValue::Id)
+    {
+        bool value;
+        ReturnErrorOnFailure(aDecoder.Decode(value));
+        return SetStateValue(aPath.mEndpointId, value);
+    }
+
+    return CHIP_ERROR_UNSUPPORTED_CHIP_FEATURE;
 }
