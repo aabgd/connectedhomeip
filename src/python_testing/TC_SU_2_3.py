@@ -53,6 +53,28 @@ from python_testing.matter_testing_infrastructure.chip.typings.chip.testing.deco
 
 class TC_SU_2_3(MatterBaseTest):
 
+    cluster_otap = Clusters.OtaSoftwareUpdateProvider
+    cluster_otar = Clusters.OtaSoftwareUpdateRequestor
+
+    async def write_acl(self, controller, acl):
+        """
+        Writes the Access Control List (ACL) to the DUT device using the specified controller.
+        Args:
+            controller: The Matter controller (e.g., th1, th4) that will perform the write operation.
+            acl (list): List of AccessControlEntryStruct objects defining the ACL permissions to write.
+            node_id:
+        Raises:
+            AssertionError: If writing the ACL attribute fails (status is not Status.Success).
+        """
+
+    async def write_acl(self, controller, node_id, acl):
+        result = await controller.WriteAttribute(
+            node_id,
+            [(0, Clusters.AccessControl.Attributes.Acl(acl))]
+        )
+        asserts.assert_equal(result[0].Status, Status.Success, "ACL write failed")
+        return True
+
     def desc_TC_SU_2_3(self):
         return '[TC-SU-2.3] Transfer of Software Update Images between DUT and TH/OTA-P'
 
