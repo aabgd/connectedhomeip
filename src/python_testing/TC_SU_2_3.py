@@ -43,45 +43,110 @@
 # === END CI TEST ARGUMENTS ===
 
 import logging
+import shlex
+import subprocess
+import threading
+import time
 
-import chip.clusters as Clusters
-from chip.testing.matter_testing import MatterBaseTest, TestStep, async_test_body, default_matter_test_main
+import matter.clusters as Clusters
+from matter.testing.matter_testing import MatterBaseTest, TestStep, async_test_body, default_matter_test_main
 from mobly import asserts
 
-from python_testing.matter_testing_infrastructure.chip.typings.chip.testing.decorators import has_feature, run_if_endpoint_matches
+logger = logging.getLogger(__name__)
+
+
+class App():
+    def __init__(self, app: str, name: str, discriminator: int, passcode: int, secured_device_port: int):
+        self.app = app
+        self.name = name
+        self.discriminator = discriminator
+        self.passcode = passcode
+        self.secured_device_port = secured_device_port
+        self.log_file_path = f'/tmp/{self.name}_output.log'
+        self.process = None
+        self.log_thread = None
+
+    def launch(self):
+        command = self.get_command()
+        logger.info(f'Launching {self.name} with command: {command}')
+        self.process = subprocess.Popen(shlex.split(command), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        self.start_log_thread()
+        time.sleep(5)
+
+    def terminate(self):
+        if self.process:
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=5)
+            except subprocess.TimeoutExpired as e:
+                self.process.kill()
+                logger.error(f'Error terminating process: {e}')
+            logger.info('Process terminated')
+
+    # Thread that write logs without block test
+    def _follow_output(self):
+        for line in self.process.stdout:
+            with open(self.log_file_path, "a") as f:
+                f.write(line)
+                f.flush()
+
+    def start_log_thread(self):
+        self.log_thread = threading.Thread(target=self._follow_output, daemon=True)
+        self.log_thread.start()
+
+
+class Provider(App):
+    def __init__(self, app: str, name: str, filepath: str, discriminator: int = 1234, passcode: int = 20202021, secured_device_port: int = 5540):
+        super().__init__(app, name, discriminator, passcode, secured_device_port)
+        self.filepath = filepath
+
+    def get_command(self):
+        return f'{self.app} --filepath {self.filepath} --discriminator {self.discriminator} --passcode {self.passcode} --secured-device-port {self.secured_device_port}'
+
+
+class Requestor(App):
+    def __init__(self, app: str, name: str, kvs: str, discriminator: int = 1234, passcode: int = 20202021, secured_device_port: int = 5541):
+        super().__init__(app, name, discriminator, passcode, secured_device_port)
+        self.kvs = kvs
+
+    def get_command(self):
+        return f'{self.app} --discriminator {self.discriminator} --passcode {self.passcode} --secured-device-port {self.secured_device_port} --autoApplyImage --KVS {self.kvs}'
 
 
 class TC_SU_2_3(MatterBaseTest):
+    """
+    This test case verifies that the DUT behaves according to the spec when it is transferring images from the TH/OTA-P.
+    """
 
     cluster_otap = Clusters.OtaSoftwareUpdateProvider
     cluster_otar = Clusters.OtaSoftwareUpdateRequestor
 
-    async def write_acl(self, controller, acl):
-        """
-        Writes the Access Control List (ACL) to the DUT device using the specified controller.
-        Args:
-            controller: The Matter controller (e.g., th1, th4) that will perform the write operation.
-            acl (list): List of AccessControlEntryStruct objects defining the ACL permissions to write.
-            node_id:
-        Raises:
-            AssertionError: If writing the ACL attribute fails (status is not Status.Success).
-        """
+    provider_1 = Provider(app='./out/debug/chip-ota-provider-app', name='provider_1',
+                          filepath='firmware_requestor_v2.ota')
+    requestor_1 = Requestor(app='./out/debug/chip-ota-requestor-app', name='requestor_1',
+                            kvs='/tmp/chip_kvs_requestor')
+    provider_process = None
+    requestor_process = None
 
-    async def write_acl(self, controller, node_id, acl):
-        result = await controller.WriteAttribute(
-            node_id,
-            [(0, Clusters.AccessControl.Attributes.Acl(acl))]
-        )
-        asserts.assert_equal(result[0].Status, Status.Success, "ACL write failed")
-        return True
+    def setup_class(self):
+        logger.info("Setting up TC_SU_2_3 class resources")
+        # Launch the OTA Provider
+        self.provider_process = self.provider_1.launch()
+        self.requestor_process = self.requestor_1.launch()
+
+    def teardown_class(self):
+        logger.info("Tearing down TC_SU_2_3 class resources")
+        # Terminate the OTA Provider
+        self.provider_1.terminate()
+        self.requestor_1.terminate()
 
     def desc_TC_SU_2_3(self):
         return '[TC-SU-2.3] Transfer of Software Update Images between DUT and TH/OTA-P'
 
-    def pics_TC_SU_2_2(self):
+    def pics_TC_SU_2_3(self):
         """Return the PICS definitions associated with this test."""
         pics = [
-            "MCORE.OTA.Requestor",      # Pics
+            'MCORE.OTA.Requestor',
         ]
         return pics
 
@@ -90,9 +155,9 @@ class TC_SU_2_3(MatterBaseTest):
                 TestStep(1, 'DUT sends a QueryImage command to the TH/OTA-P. RequestorCanConsent is set to True by DUT. OTA-P/TH responds with a QueryImageResponse with UserConsentNeeded field set to True.',
                          'Verify that the DUT obtains the User Consent from the user prior to transfer of software update image. This step is vendor specific.'),
                 TestStep(2, 'DUT sends a QueryImage command to the TH/OTA-P. TH/OTA-P sends a QueryImageResponse back to DUT. QueryStatus is set to "UpdateAvailable". Set ImageURI to the location where the image is located.',
-                         'Verify that there is a transfer of the software image from the TH/OTA-P to the DUT.',
+                         'Verify that there is a transfer of the software image from the TH/OTA-P to the DUT.'
                          'Verify that the Maximum Block Size requested by DUT should be'
-                         '- no larger than 8192 (2^13) bytes over TCP transport.',
+                         '- no larger than 8192 (2^13) bytes over TCP transport.'
                          '- no larger than 1024 (2^10) bytes over non-TCP transports.'),
                 TestStep(3, 'DUT sends a QueryImage command to the TH/OTA-P. TH/OTA-P sends a QueryImageResponse back to DUT. QueryStatus is set to "UpdateAvailable". Set ImageURI with the https url of the software image.',
                          'Verify that there is a transfer of the software image from the TH/OTA-P to the DUT from the https url and not from the OTA-P.'),
@@ -104,9 +169,7 @@ class TC_SU_2_3(MatterBaseTest):
                 ]
 
     @async_test_body
-    # @run_if_endpoint_matches(has_feature(Clusters.NetworkCommissioning, Clusters.NetworkCommissioning.Bitmaps.Feature.kThreadNetworkInterface))
     async def test_TC_SU_2_3(self):
-
         # Precondition: DUT is commissioned
         self.step("precondition")
 
@@ -133,7 +196,8 @@ class TC_SU_2_3(MatterBaseTest):
         # TH/OTA-P sends a QueryImageResponse back to DUT.
         # QueryStatus is set to "UpdateAvailable".
         # Set ImageURI with the https url of the software image.
-        self.step(3)
+        # HTTPS Transfer not available, skip test
+        self.skip_step(3)
 
         # Verify that there is a transfer of the software image from the TH/OTA-P to the DUT from the https url and not from the OTA-P.
 
@@ -150,8 +214,6 @@ class TC_SU_2_3(MatterBaseTest):
         # Initiate another QueryImage Command from DUT to the TH/OTA-P.
         # Set the RC[STARTOFS] bit and associated STARTOFS field in the ReceiveInit Message to indicate the resumption of a transfer previously aborted.
         self.step(5)
-
-        # Verify that the DUT starts receiving the rest of the software image after resuming the image transfer.
 
 
 if __name__ == "__main__":
