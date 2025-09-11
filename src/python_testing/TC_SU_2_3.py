@@ -52,36 +52,37 @@ import asyncio
 
 import matter.clusters as Clusters
 from matter import ChipDeviceCtrl
+from matter.clusters.Types import NullValue
+from matter.interaction_model import Status
+from matter.testing.event_attribute_reporting import EventSubscriptionHandler
 from matter.testing.matter_testing import MatterBaseTest, TestStep, async_test_body, default_matter_test_main
 from mobly import asserts
 
 logger = logging.getLogger(__name__)
 
 
-class OTAProvider():
-    def __init__(self, app: str, name: str, filepath: str, node_id: int, discriminator: int = 1234, passcode: int = 20202021, secured_device_port: int = 5540, logs: bool = False):
+class OTAApplication:
+    def __init__(self, app: str, name: str, node_id: int, discriminator: int = 1234, passcode: int = 20202021, secured_device_port: int = 5540, logs: bool = False, extra_args: list = None, log_file_path: str = None):
         self.app = app
         self.name = name
-        self.filepath = filepath
         self.node_id = node_id
         self.discriminator = discriminator
         self.passcode = passcode
         self.secured_device_port = secured_device_port
         self.logs = logs
-        self.log_file_path = f'/tmp/{self.name}_output.log'
+        self.extra_args = extra_args or []
+        self.log_file_path = log_file_path or f'/tmp/{self.name}_output.log'
         self.process = None
         self.log_thread = None
 
     async def launch(self):
         command = self.get_command()
-        # Basic sanity about binary
         if not os.path.exists(self.app):
             logger.error(f'{self.name}: binary not found at {self.app}')
         elif not os.access(self.app, os.X_OK):
             logger.error(f'{self.name}: binary is not executable: {self.app}')
 
-        logger.info(f'Launching {self.name} with command: {command}')
-        # Open a header in the log file early for easier correlation
+        logger.info(f'Launching {self.name} with command: {" ".join(command)}')
         try:
             with open(self.log_file_path, 'a') as f:
                 f.write(f'\n==== {self.name} launch at {time.time():.0f} ====' '\n')
@@ -89,7 +90,7 @@ class OTAProvider():
             logger.warning(f'{self.name}: could not open log file {self.log_file_path}: {e}')
 
         self.process = subprocess.Popen(
-            shlex.split(command), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+            command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
         )
         asserts.assert_true(self.process is not None, f'Failed to launch {self.name}')
 
@@ -98,10 +99,8 @@ class OTAProvider():
         if self.logs:
             self.start_log_thread()
 
-        # Give the process some time to bind sockets and print status
-        await asyncio.sleep(5)
+        await asyncio.sleep(10)
 
-        # If process died early, dump output to help debugging
         if self.process.poll() is not None:
             try:
                 remaining = self.process.stdout.read() if self.process.stdout else ''
@@ -121,7 +120,6 @@ class OTAProvider():
                 logger.error(f'Error terminating process: {e}')
             logger.info(f'{self.name}: process terminated with rc={self.process.returncode}')
 
-    # Thread that write logs without block test
     def _follow_output(self):
         for line in self.process.stdout:
             with open(self.log_file_path, "a") as f:
@@ -132,13 +130,7 @@ class OTAProvider():
         self.log_thread = threading.Thread(target=self._follow_output, daemon=True)
         self.log_thread.start()
 
-    def get_command(self):
-        return f'{self.app} --filepath {self.filepath} --discriminator {self.discriminator} --passcode {self.passcode} --secured-device-port {self.secured_device_port}'
-
     async def commission(self, controller):
-        """
-        Commission this OTA provider using the given controller.
-        """
         logger.info(f"Commissioning {self.name} with discriminator {self.discriminator} and passcode {self.passcode}")
         resp = await controller.CommissionOnNetwork(
             nodeId=self.node_id,
@@ -150,6 +142,40 @@ class OTAProvider():
         return resp
 
 
+class OTAProvider(OTAApplication):
+    def __init__(self, app: str, name: str, filepath: str, node_id: int, discriminator: int = 1234, passcode: int = 20202021, secured_device_port: int = 5540, logs: bool = False, extra_args: list = None, log_file_path: str = None):
+        self.filepath = filepath
+        super().__init__(app, name, node_id, discriminator, passcode, secured_device_port, logs, extra_args or [], log_file_path)
+
+    def get_command(self):
+        # Provider CLI: ./out/debug/chip-ota-provider-app --filepath firmware_v2.ota --discriminator 1234 --passcode 20202021 --secured-device-port 5540 [extra_args]
+        cmd = [self.app,
+               '--filepath', self.filepath,
+               '--discriminator', str(self.discriminator),
+               '--passcode', str(self.passcode),
+               '--secured-device-port', str(self.secured_device_port)]
+        cmd += self.extra_args
+        logger.info(f'{self.name} command: {" ".join(cmd)}')
+        return cmd
+
+
+class OTARequestor(OTAApplication):
+    def __init__(self, app: str, name: str, node_id: int, discriminator: int = 1234, passcode: int = 20202021, secured_device_port: int = 5541, logs: bool = False, extra_args: list = None, log_file_path: str = None):
+        super().__init__(app, name, node_id, discriminator, passcode, secured_device_port, logs, extra_args, log_file_path)
+
+    def get_command(self):
+        # Requestor CLI: ./out/debug/chip-ota-requestor-app --discriminator 1234 --passcode 20202021 --secured-device-port 5541 --autoApplyImage --KVS /tmp/chip_kvs_requestor [extra_args]
+        cmd = [self.app,
+               '--discriminator', str(self.discriminator),
+               '--passcode', str(self.passcode),
+               '--secured-device-port', str(self.secured_device_port),
+               '--autoApplyImage',
+               '--KVS', f'/tmp/chip_kvs_requestor']
+        cmd += self.extra_args
+        logger.info(f'{self.name} command: {" ".join(cmd)}')
+        return cmd
+
+
 class TC_SU_2_3(MatterBaseTest):
     """
     This test case verifies that the DUT behaves according to the spec when it is transferring images from the TH/OTA-P.
@@ -158,11 +184,12 @@ class TC_SU_2_3(MatterBaseTest):
     cluster_otap = Clusters.OtaSoftwareUpdateProvider
     cluster_otar = Clusters.OtaSoftwareUpdateRequestor
 
-    provider_process = None
-
     # TH variables
-    P1_NODE_ID = 10
-    P2_NODE_ID = 11
+    PROVIDER_NODE_ID = 10
+    PROVIDER_PORT = 5540
+    REQUESTOR_PORT = 5541
+
+    provider = None
 
     def desc_TC_SU_2_3(self):
         return '[TC-SU-2.3] Transfer of Software Update Images between DUT and TH/OTA-P'
@@ -192,10 +219,103 @@ class TC_SU_2_3(MatterBaseTest):
                          'Verify that the DUT starts receiving the rest of the software image after resuming the image transfer.')
                 ]
 
+    async def _write_acl_rules(self, controller, endpoint: int, node_id):
+        logger.info("Configure ACL Entries")
+        admin_node_id = controller.nodeId
+        logger.info(f"Admin node id is {admin_node_id}")
+        logger.info(f"FabricId value: {controller.fabricId}")
+
+        acl_attr_base = await self.read_single_attribute_check_success(
+            dev_ctrl=controller,
+            cluster=Clusters.AccessControl,
+            attribute=Clusters.AccessControl.Attributes.Acl,
+            node_id=node_id,
+        )
+        logger.info(f"Provider base acl {acl_attr_base}")
+
+        acl_entries = [
+            Clusters.Objects.AccessControl.Structs.AccessControlEntryStruct(
+                fabricIndex=controller.fabricId,
+                privilege=Clusters.AccessControl.Enums.AccessControlEntryPrivilegeEnum.kAdminister,
+                authMode=Clusters.AccessControl.Enums.AccessControlEntryAuthModeEnum.kCase,
+                subjects=[admin_node_id],
+                targets=NullValue
+            ),
+            Clusters.Objects.AccessControl.Structs.AccessControlEntryStruct(
+                fabricIndex=controller.fabricId,
+                privilege=Clusters.AccessControl.Enums.AccessControlEntryPrivilegeEnum.kOperate,
+                authMode=Clusters.AccessControl.Enums.AccessControlEntryAuthModeEnum.kCase,
+                subjects=[],
+                targets=[Clusters.AccessControl.Structs.AccessControlTargetStruct(
+                    endpoint=NullValue,
+                    cluster=self.cluster_otap.id,
+                    deviceType=NullValue
+                )]
+            )
+        ]
+
+        all_acls = acl_attr_base + acl_entries
+        acl_attr = Clusters.Objects.AccessControl.Attributes.Acl(value=all_acls)
+        resp = await controller.WriteAttribute(node_id, [(endpoint, acl_attr)])
+        asserts.assert_equal(resp[0].Status, Status.Success, "ACL write failed.")
+        logger.info("ACL permissions configured successfully.")
+
+    async def _write_ota_providers(self, controller, provider_node_id, requestor_node_id, endpoint: int = 0):
+        current_otap_info = await self.read_single_attribute_check_success(
+            dev_ctrl=controller,
+            cluster=self.cluster_otar,
+            attribute=self.cluster_otar.Attributes.DefaultOTAProviders,
+            node_id=requestor_node_id,
+        )
+        logger.info(f"OTA Providers: {current_otap_info}")
+
+        # Create Provider Location into Requestor
+        provider_location_struct = self.cluster_otar.Structs.ProviderLocation(
+            providerNodeID=provider_node_id,
+            endpoint=endpoint,
+            fabricIndex=controller.fabricId
+        )
+
+        # Create the OTA Provider Attribute
+        ota_providers_attr = self.cluster_otar.Attributes.DefaultOTAProviders(value=[provider_location_struct])
+
+        # Write the Attribute
+        resp = await controller.WriteAttribute(
+            attributes=[(endpoint, ota_providers_attr)],
+            nodeid=requestor_node_id,
+        )
+        asserts.assert_equal(resp[0].Status, Status.Success, "Failed to write Default OTA Providers Attribute")
+        logger.info("OTA Providers configured successfully.")
+
+    async def _announce_ota_provider(self, controller, provider_node_id, requestor_node_id, reason: Clusters.OtaSoftwareUpdateRequestor.Enums.AnnouncementReasonEnum = Clusters.OtaSoftwareUpdateRequestor.Enums.AnnouncementReasonEnum.kUpdateAvailable):
+        cmd_announce_ota_provider = self.cluster_otar.Commands.AnnounceOTAProvider(
+            providerNodeID=provider_node_id,
+            vendorID=0xFFF1,
+            announcementReason=reason,
+            metadataForNode=None,
+            endpoint=0
+        )
+        logger.info("Sending AnnounceOTA Provider Command")
+        cmd_resp = await self.send_single_cmd(
+            cmd=cmd_announce_ota_provider,
+            dev_ctrl=controller,
+            node_id=requestor_node_id,
+            endpoint=0,
+        )
+        logger.info(f"Announce command sent {cmd_resp}")
+        return cmd_resp
+
+    @async_test_body
+    async def teardown_test(self):
+        if hasattr(self, 'provider') and self.provider is not None:
+            logger.info("Terminating provider in teardown_test")
+            await self.provider.terminate()
+            self.provider = None
+
     @async_test_body
     async def test_TC_SU_2_3(self):
-        # Precondition: DUT is commissioned
-        self.step("precondition")
+        # Initialize provider variable
+        self.provider = None
 
         th = self.default_controller
         endpoint = self.get_endpoint(default=0)
@@ -207,24 +327,63 @@ class TC_SU_2_3(MatterBaseTest):
         )
         passcode = setup_payloads[0].passcode if setup_payloads else 20202021
 
-        # DUT sends a QueryImage command to the TH/OTA-P.
-        # RequestorCanConsent is set to True by DUT.
-        # OTA-P/TH responds with a QueryImageResponse with UserConsentNeeded field set to True.
-        self.step(1)
-
-        provider_1 = OTAProvider(app='./out/debug/chip-ota-provider-app',
-                                 name='provider_1',
-                                 node_id=self.P1_NODE_ID,
-                                 filepath='firmware_requestor_v2.ota',
-                                 discriminator=discriminator,
-                                 passcode=passcode,
-                                 logs=True)
-        await provider_1.launch()
-        await provider_1.commission(th)
-
-        await provider_1.terminate()
+        # Precondition: DUT is commissioned
+        self.step("precondition")
 
         # Verify that the DUT obtains the User Consent from the user prior to transfer of software update image. This step is vendor specific.
+        self.step(1)
+
+        self.provider = OTAProvider(
+            app='./out/debug/chip-ota-provider-app',
+            name='provider_1',
+            node_id=self.PROVIDER_NODE_ID,
+            filepath='firmware_requestor_v2.ota',
+            discriminator=discriminator,
+            passcode=passcode,
+            secured_device_port=self.PROVIDER_PORT,
+            logs=True,
+            extra_args=["-u", "deferred", "-c"],
+        )
+        await self.provider.launch()
+        await self.provider.commission(th)
+
+        # Configure ACL rules on the provider
+        await self._write_acl_rules(controller=th, endpoint=0, node_id=self.PROVIDER_NODE_ID)
+
+        # Configure OTA providers on the requestor (DUT)
+        await self._write_ota_providers(controller=th, provider_node_id=self.PROVIDER_NODE_ID, requestor_node_id=self.dut_node_id, endpoint=0)
+
+        # Create event subscriber for StateTransition events
+        state_transition_event_handler = EventSubscriptionHandler(
+            expected_cluster=self.cluster_otar,
+            expected_event_id=self.cluster_otar.Events.StateTransition.event_id
+        )
+        await state_transition_event_handler.start(th, self.dut_node_id, endpoint=0, min_interval_sec=0, max_interval_sec=60*6)
+
+        # Announce OTA provider to trigger the process
+        await self._announce_ota_provider(th, self.PROVIDER_NODE_ID, self.dut_node_id)
+
+        # Wait for transition to Querying state
+        event_report = state_transition_event_handler.wait_for_event_report(
+            self.cluster_otar.Events.StateTransition, timeout_sec=30)
+        logger.info(f"Event report - transition to Querying: {event_report}")
+        asserts.assert_equal(event_report.previousState, self.cluster_otar.Enums.UpdateStateEnum.kIdle,
+                             "Previous state was not Idle")
+        asserts.assert_equal(event_report.newState, self.cluster_otar.Enums.UpdateStateEnum.kQuerying, "New state is not Querying")
+
+        # Wait for transition to DelayedOnUserConsent state
+        event_report = state_transition_event_handler.wait_for_event_report(
+            self.cluster_otar.Events.StateTransition, timeout_sec=30)
+        logger.info(f"Event report - transition to DelayedOnUserConsent: {event_report}")
+        asserts.assert_equal(event_report.previousState, self.cluster_otar.Enums.UpdateStateEnum.kQuerying,
+                             "Previous state was not Querying")
+        asserts.assert_equal(event_report.newState, self.cluster_otar.Enums.UpdateStateEnum.kDelayedOnUserConsent,
+                             "New state is not DelayedOnUserConsent")
+
+        logger.info("Step 1 PASSED: DUT correctly transitioned to DelayedOnUserConsent state, indicating it requested user consent before proceeding with the software update")
+
+        # Clean up event handler
+        state_transition_event_handler.reset()
 
         # DUT sends a QueryImage command to the TH/OTA-P.
         # TH/OTA-P sends a QueryImageResponse back to DUT.
