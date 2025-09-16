@@ -143,7 +143,7 @@ class OTAApplication:
 
 
 class OTAProvider(OTAApplication):
-    def __init__(self, app: str, name: str, filepath: str, node_id: int, discriminator: int = 1234, passcode: int = 20202021, secured_device_port: int = 5540, logs: bool = False, extra_args: list = None, log_file_path: str = None):
+    def __init__(self, app: str, name: str, filepath: str, node_id: int, discriminator: int = 321, passcode: int = 2321, secured_device_port: int = 5541, logs: bool = False, extra_args: list = None, log_file_path: str = None):
         self.filepath = filepath
         super().__init__(app, name, node_id, discriminator, passcode, secured_device_port, logs, extra_args or [], log_file_path)
 
@@ -160,7 +160,7 @@ class OTAProvider(OTAApplication):
 
 
 class OTARequestor(OTAApplication):
-    def __init__(self, app: str, name: str, node_id: int, discriminator: int = 1234, passcode: int = 20202021, secured_device_port: int = 5541, logs: bool = False, extra_args: list = None, log_file_path: str = None):
+    def __init__(self, app: str, name: str, node_id: int = 10, discriminator: int = 1234, passcode: int = 20202021, secured_device_port: int = 5541, logs: bool = False, extra_args: list = None, log_file_path: str = None):
         super().__init__(app, name, node_id, discriminator, passcode, secured_device_port, logs, extra_args, log_file_path)
 
     def get_command(self):
@@ -186,8 +186,8 @@ class TC_SU_2_3(MatterBaseTest):
 
     # TH variables
     PROVIDER_NODE_ID = 10
-    PROVIDER_PORT = 5540
-    REQUESTOR_PORT = 5541
+    PROVIDER_PORT = 5541
+    REQUESTOR_PORT = 5540
 
     provider = None
 
@@ -306,13 +306,6 @@ class TC_SU_2_3(MatterBaseTest):
         return cmd_resp
 
     @async_test_body
-    async def teardown_test(self):
-        if hasattr(self, 'provider') and self.provider is not None:
-            logger.info("Terminating provider in teardown_test")
-            await self.provider.terminate()
-            self.provider = None
-
-    @async_test_body
     async def test_TC_SU_2_3(self):
         # Initialize provider variable
         self.provider = None
@@ -338,8 +331,6 @@ class TC_SU_2_3(MatterBaseTest):
             name='provider_1',
             node_id=self.PROVIDER_NODE_ID,
             filepath='firmware_requestor_v2.ota',
-            discriminator=discriminator,
-            passcode=passcode,
             secured_device_port=self.PROVIDER_PORT,
             logs=True,
             extra_args=["-u", "deferred", "-c"],
@@ -347,19 +338,21 @@ class TC_SU_2_3(MatterBaseTest):
         await self.provider.launch()
         await self.provider.commission(th)
 
-        # Configure ACL rules on the provider
-        await self._write_acl_rules(controller=th, endpoint=0, node_id=self.PROVIDER_NODE_ID)
-
-        # Configure OTA providers on the requestor (DUT)
-        await self._write_ota_providers(controller=th, provider_node_id=self.PROVIDER_NODE_ID, requestor_node_id=self.dut_node_id, endpoint=0)
-
         # Create event subscriber for StateTransition events
         state_transition_event_handler = EventSubscriptionHandler(
             expected_cluster=self.cluster_otar,
             expected_event_id=self.cluster_otar.Events.StateTransition.event_id
         )
         await state_transition_event_handler.start(th, self.dut_node_id, endpoint=0, min_interval_sec=0, max_interval_sec=60*6)
+        basicinformation_handler = EventSubscriptionHandler(
+            expected_cluster=Clusters.BasicInformation, expected_event_id=Clusters.BasicInformation.Events.ShutDown.event_id)
+        await basicinformation_handler.start(th, self.dut_node_id, endpoint=0, min_interval_sec=0, max_interval_sec=5000)
 
+        # Configure ACL rules on the provider
+        await self._write_acl_rules(controller=th, endpoint=0, node_id=self.PROVIDER_NODE_ID)
+
+        # Configure OTA providers on the requestor (DUT)
+        await self._write_ota_providers(controller=th, provider_node_id=self.PROVIDER_NODE_ID, requestor_node_id=self.dut_node_id, endpoint=0)
         # Announce OTA provider to trigger the process
         await self._announce_ota_provider(th, self.PROVIDER_NODE_ID, self.dut_node_id)
 
@@ -382,43 +375,81 @@ class TC_SU_2_3(MatterBaseTest):
 
         logger.info("Step 1 PASSED: DUT correctly transitioned to DelayedOnUserConsent state, indicating it requested user consent before proceeding with the software update")
 
-        # Clean up event handler
-        state_transition_event_handler.reset()
-
+        self.step(2)
         # DUT sends a QueryImage command to the TH/OTA-P.
         # TH/OTA-P sends a QueryImageResponse back to DUT.
         # QueryStatus is set to "UpdateAvailable".
         # Set ImageURI to the location where the image is located.
-        self.step(2)
 
         # Verify that there is a transfer of the software image from the TH/OTA-P to the DUT.
 
-        # Verify that the Maximum Block Size requested by DUT should be
-        # - no larger than 8192 (2^13) bytes over TCP transport.
-        # - no larger than 1024 (2^10) bytes over non-TCP transports.
+        # 1. DelayedOnUserConsent -> Downloading
+        event_report = state_transition_event_handler.wait_for_event_report(
+            self.cluster_otar.Events.StateTransition, timeout_sec=10)
+        logger.info(f"Event report - transition to Downloading: {event_report}")
+        asserts.assert_equal(event_report.previousState, self.cluster_otar.Enums.UpdateStateEnum.kDelayedOnUserConsent,
+                             "Previous state was not DelayedOnUserConsent")
+        asserts.assert_equal(event_report.newState, self.cluster_otar.Enums.UpdateStateEnum.kDownloading,
+                             "New state is not Downloading")
 
+        # 2. Downloading -> Applying
+        event_report = state_transition_event_handler.wait_for_event_report(
+            self.cluster_otar.Events.StateTransition, timeout_sec=240)
+        logger.info(f"Event report - transition to Applying: {event_report}")
+        asserts.assert_equal(event_report.previousState, self.cluster_otar.Enums.UpdateStateEnum.kDownloading,
+                             "Previous state was not Downloading")
+        asserts.assert_equal(event_report.newState, self.cluster_otar.Enums.UpdateStateEnum.kApplying,
+                             "New state is not Applying")
+
+        # 3. Applying -> DelayedOnApply
+        event_report = state_transition_event_handler.wait_for_event_report(
+            self.cluster_otar.Events.StateTransition, timeout_sec=60*5)
+        logger.info(f"Event report - transition to DelayedOnApply: {event_report}")
+        asserts.assert_equal(event_report.previousState, self.cluster_otar.Enums.UpdateStateEnum.kApplying,
+                             "Previous state was not Applying")
+        asserts.assert_equal(event_report.newState, self.cluster_otar.Enums.UpdateStateEnum.kDelayedOnApply,
+                             "New state is not DelayedOnApply")
+
+        # Wait for Restart or ShutdownEvent
+        shutdown_event = basicinformation_handler.wait_for_event_report(Clusters.BasicInformation.Events.ShutDown, timeout_sec=60*4)
+        logger.info(f"Shutting down {shutdown_event}")
+        await state_transition_event_handler.cancel()
+        await basicinformation_handler.cancel()
+
+        logger.info("Step 2 PASSED: Software image transfer and application sequence detected via StateTransition events.")
+
+        # Clean up event handler
+        await state_transition_event_handler.reset()
+        th.ExpireSessions(nodeid=self.dut_node_id)
+
+        self.skip_step(3)
         # DUT sends a QueryImage command to the TH/OTA-P.
         # TH/OTA-P sends a QueryImageResponse back to DUT.
         # QueryStatus is set to "UpdateAvailable".
         # Set ImageURI with the https url of the software image.
         # HTTPS Transfer not available, skip test
-        self.skip_step(3)
 
         # Verify that there is a transfer of the software image from the TH/OTA-P to the DUT from the https url and not from the OTA-P.
 
+        self.step(4)
         # During the transfer of the image to the DUT, force fail the transfer before it completely transfers the image.
         # Wait for the Idle timeout so that reading the UpdateState Attribute of the OTA Requestor returns the value as Idle.
         # Initiate another QueryImage Command from DUT to the TH/OTA-P.
-        self.step(4)
 
         # Verify that the BDX Idle timeout should be no less than 5 minutes.
 
         # Verify that the DUT starts a new transfer of software image when sending another QueryImage request.
 
+        self.step(5)
         # During the transfer of the image to the DUT, force fail the transfer before it completely transfers the image.
         # Initiate another QueryImage Command from DUT to the TH/OTA-P.
         # Set the RC[STARTOFS] bit and associated STARTOFS field in the ReceiveInit Message to indicate the resumption of a transfer previously aborted.
-        self.step(5)
+
+        # Run cleanup only at the end of the complete test
+        if self.provider is not None:
+            logger.info("Terminating provider at the end of test_TC_SU_2_3")
+            await self.provider.terminate()
+            self.provider = None
 
 
 if __name__ == "__main__":
